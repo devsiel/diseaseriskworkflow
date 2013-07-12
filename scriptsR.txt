@@ -1,0 +1,174 @@
+##-------------------------------
+## Workspace et historique de R
+##_______________________________
+# sauver son workspace (variables et données R)
+save.image("~/Documents/20120413_Test/Donnees_Paludisme/.RData")
+# charger son workspace (variables et données R)
+load("~/Documents/20120413_Test/Donnees_Paludisme/.RData")
+# sauver son historique (commandes R)
+savehistory("~/Documents/20120413_Test/Donnees_Paludisme/.Rhistory")
+# charger son historique (commandes R)
+loadhistory("~/Documents/20120413_Test/Donnees_Paludisme/.Rhistory")
+
+# installer une librairie
+install.packages("sgeostat")
+#charger une librairie
+library("ade4")
+
+## Supprimer une variable R
+rm(nom_variable)
+
+## Rechecher de l'aide 
+help(nom_fonction)
+#ou 
+??nom_fonction
+
+##_______________________________
+
+
+##-------------------------------
+## Connection PostgreSQL/Postgis (RPostgreSQL/DBI)
+##_______________________________
+
+## load Package
+library(RPostgreSQL)
+## loads the PostgreSQL driver
+drv <- dbDriver("PostgreSQL")
+## Open a connection
+con <- dbConnect(drv, port=5433, dbname= "bandiagara", user="tp", password="tp")
+## Requête PostgreSQL/Postgis
+## Submits a statement = Select all records from table
+rs <- dbSendQuery(con, "select surf from tab_bati")
+## fetch all elements from the result set
+fetch(rs,n=-1) ## return all elements
+## Submit and execute the query
+dbGetQuery(con, "select surf from tab_bati")
+## Access to one field
+data <- fetch(rs,n=-1)
+data$surf
+## Plot of one field
+plot(id,data$surf)
+## Déconnection PostgreSQL/Postgis
+## Closes the connection
+dbDisconnect(con)
+## Frees all the resources on the driver
+dbUnloadDriver(drv)
+##_______________________________
+
+
+##-------------------------------
+## Calcul de cellSize (résolution du raster Bati)
+##_______________________________
+# cellSize= sqrt(surface1hab) = sqrt(surfaceTotale/populationTotale)
+surfaceTotale= 249394.70358
+populationTotale= 14133
+surface1hab <- surfaceTotale/populationTotale
+surface1hab= 17.64627
+cellSize <- sqrt(surface1hab)
+cellSize= 4.200746
+cellSize <- round(cellSize,2) # arrondi
+
+
+##-------------------------------
+## Traitements données SIG Vecteur/Raster
+##_______________________________
+
+library ("rgdal") ## images et vecteurs
+library ("raster") ## images
+library("maptools") ## fichiers kml
+library("sp") ## fichiers matrices (spatialgrid)
+
+## Lecture de fichiers Shapefile (ESRI)
+layer_bati <- readOGR (dsn="workspace", layer="B_bati")
+## affichage + titre
+plot(layer_bati, axes=TRUE, las=2)
+title("Bandiagara Bati - wgs84/UTM Zone 30N")
+## reprojection
+batiWGS84 <- spTransform (layer_bati, CRS ("+init=epsg:4326")) 
+## Lecture de fichiers Raster (.tif)
+#quickbird <- readGDAL("extrait_fusion_Qbd.tif") # attention image trop grande 4447*5044 cellules
+quickbird <- readGDAL("subset_Qbd.tif")
+## Informations du Raster (package sp)
+str(quickbird)
+## affichage projection raster (package raster)
+projection(quickbird)
+## reprojection raster (package raster)
+quickbirdWGS84 <- projectRaster(quickbird, crs=proj4string(batiWGS84)) ## utilisation du sytème de référence du polygone batiWGS84
+## écriture d'un raster (package raster), passage de type "RasterLayer" à "SpatialGridDataFrame"
+myRaster <- writeRaster(ras_bati, "R_ras_bati.tif")
+
+## Converting a polygon into a raster using R
+##_______________________________
+layer_bati <- readOGR (dsn="/home/tp/Documents/20120413_Test/Donnees_Paludisme", layer="B_bati") # lecture directe
+## Création d'un raster "r2" et attribution de l'étendue du shp "mylayer2" au raster
+##_______________________________
+mylayer2 <- readOGR(dsn="PG:host=localhost user=tp dbname=bandiagara password=tp port=5433",layer="tab_bati") # lecture du shp dans BD
+r2 <-raster(mylayer2)
+res(r2) <- 4.2 #résolution 4.2m
+ras_bati2 <- rasterize(mylayer2,r2,'FID') # création au préalable du champ FID(serial) dans la table Postgis "tab_bati"
+
+## Convert raster to point using R
+##_______________________________
+points_bati <- rasterToPoints(ras_bati,fun=function(x){x>0},spatial=TRUE)
+
+##_______________________________
+## Exporter la variable R "points_bati" en shapefile
+writeOGR(points_bati,dsn="/home/tp/Documents/20120413_Test/Donnees_Paludisme", layer="R_points_bati", driver="ESRI Shapefile")
+## Exporter la variable R "quickbird" en image .tif
+writeGDAL(quickbird, "/home/tp/Documents/20120413_Test/Donnees_Paludisme/R_quickbird.tif", drivername="GTiff", type="Float32", options=NULL)
+##_______________________________
+
+
+## Calcul de la densité de bati (sans utiliser les points)
+## Démarche OK = paramètres à convertir en variables génériques
+## ---------------------------
+
+#1# lecture du fichier vecteur PostGIS à rasteriser
+mylayer2 <- readOGR(dsn="PG:host=localhost user=tp dbname=bandiagara password=tp port=5433",layer="tab_bati") # lecture dans BD
+	# OGR data source with driver: PostgreSQL 
+	# Source: "PG:host=localhost user=tp dbname=bandiagara password=tp port=5433", layer: "tab_bati"
+	# with 3397 features and 5 fields
+	# Feature type: wkbMultiPolygon with 2 dimensions
+
+#2# création du raster masque (étendue du polygone d'entrée)
+r2 <-raster(mylayer2)
+
+#3# changement de résolution à 4.2
+res(r2)<- 4.2
+
+#4# convertion vecteur -> raster de résolution 4.2, cellule de valeurs 'FID' identifiant automatique
+ras_bati2 <- rasterize(mylayer2,r2,'FID')
+	# Found 3397 region(s) and 3401 polygon(s)
+
+#5# résumé statistiques de la couche raster
+summary(ras_bati2)
+	#Cells:  220458 
+	#NAs  :  206323 
+	#Min.         1
+	#1st Qu.    976
+	#Median    1908
+	#Mean      1841
+	#3rd Qu.   2720
+	#Max.      3397
+	#NA's    206323
+
+#6# reclassement des valeurs bati = 1 non bati = 0
+# de 1 à 3397 les valeurs deviennent 1 et les NA's deviennent 0
+rc <- reclass(ras_bati2, c(-Inf,1,0, 1,3397,1, 1,Inf,0)) 
+#########
+######### il manque de récupérer les valeurs min et max de manière automatique dans le reclass
+#########
+
+#7# Translate your object from the RasterLayer class to an sp class (typically SpatialGridDataFrame for raster data), as follows:
+writeRaster(rc,"R_rc.tif") #option
+mylayer3 <- readGDAL("R_rc.tif") #option
+
+#8# Focal Function ; package raster
+rfocal <- focal(rc, fun=sum)
+writeRaster(rfocal,"R_rfocal.tif") #option
+
+
+
+
+
+
